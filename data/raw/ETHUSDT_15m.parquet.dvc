@@ -1,0 +1,5 @@
+outs:
+- md5: 7f2c174505babff54a8ee3b7557619a4
+  size: 2966505
+  hash: md5
+  path: ETHUSDT_15m.parquet

@@ -1,0 +1,5 @@
+outs:
+- md5: 25754d9d59fe5a1b6f67ad376751984e
+  size: 5981896
+  hash: md5
+  path: SOLUSDT_1m.parquet

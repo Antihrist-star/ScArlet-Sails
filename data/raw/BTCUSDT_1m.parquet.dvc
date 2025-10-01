@@ -1,0 +1,5 @@
+outs:
+- md5: b9287f0cdad5f6a9d78d6e85a5e60754
+  size: 2866064
+  hash: md5
+  path: BTCUSDT_1m.parquet
