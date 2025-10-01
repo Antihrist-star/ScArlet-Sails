@@ -1,0 +1,38 @@
+[
+    {
+        "file": "data/raw/BTCUSDT_15m.parquet",
+        "sha": "2dcc3daaaad3115c9c30f6001b11172283bdd3bde17038ba127ba584cdde4dde"
+    },
+    {
+        "file": "data/raw/BTCUSDT_1h.parquet",
+        "sha": "fd333f11825168456f68140824aeb25b59ce196a73f447a5748c6c2e87b0ffb9"
+    },
+    {
+        "file": "data/raw/BTCUSDT_1m.parquet",
+        "sha": "974e18bd69c70ce6bb1bac69b5319fd3b67270606b06585a29bcef3ad8a3df43"
+    },
+    {
+        "file": "data/raw/ETHUSDT_15m.parquet",
+        "sha": "df9f263d82d5dd80bb49c0118bd58b9bf16b31cbcacc890d858de7f3d40c1c01"
+    },
+    {
+        "file": "data/raw/ETHUSDT_1h.parquet",
+        "sha": "b269c52fefea85affc8d72f08f7c1b91457dfa229e636a9023c3eaa22f819af0"
+    },
+    {
+        "file": "data/raw/ETHUSDT_1m.parquet",
+        "sha": "d0c2087f9fe2888e817bad1e083583e77eb6548943082dc1a65841d0aa6d6b60"
+    },
+    {
+        "file": "data/raw/SOLUSDT_15m.parquet",
+        "sha": "a3bc2477d94e38483002d3faff9e4171955ff5d03090eea7df3b2b58c01420c8"
+    },
+    {
+        "file": "data/raw/SOLUSDT_1h.parquet",
+        "sha": "5463a947c4bd7a717df6a0fcc57a1de5dfc465ca1090e0a9e248d4a764d52655"
+    },
+    {
+        "file": "data/raw/SOLUSDT_1m.parquet",
+        "sha": "522a40dbf08cd2fa12c059b0e0a1ecd23fd48036caa10073100365ba4a46ee9b"
+    }
+]
