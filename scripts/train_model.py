@@ -23,6 +23,7 @@ class CNN1D(nn.Module):
         self.fc_input_size = self._get_conv_output_size(input_channels)
         self.fc1 = nn.Linear(self.fc_input_size, 50)
         self.fc2 = nn.Linear(50, output_size)
+        self.sigmoid = nn.Sigmoid()
 
     def _get_conv_output_size(self, input_channels):
         # Create a dummy input to calculate the output size of conv layers
@@ -46,6 +47,7 @@ class CNN1D(nn.Module):
         x = self.fc1(x)
         x = self.relu(x)
         x = self.fc2(x)
+        x = self.sigmoid(x)
         return x
 
 
@@ -90,7 +92,7 @@ def train_model(X, y, model_path="models/1d_cnn_model.pth", epochs=50, batch_siz
     return model
 
 if __name__ == "__main__":
-    X, y, _ = load_and_preprocess_data()
+    X, y, scaler_X, scaler_y = load_and_preprocess_data()
     trained_model = train_model(X, y)
     print("Model training complete.")
 
