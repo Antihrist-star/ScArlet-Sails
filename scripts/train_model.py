@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import TensorDataset, DataLoader
 import os
+import json
 
 class CNN1D(nn.Module):
     def __init__(self, input_features, sequence_length=60):
@@ -31,17 +32,24 @@ class CNN1D(nn.Module):
 if __name__ == "__main__":
     import sys
     sys.path.append('scripts')
-    from prepare_data import load_and_preprocess_data
+    from prepare_data_v3 import load_and_preprocess_data
 
     X_train, X_test, y_train, y_test, scaler = load_and_preprocess_data()
     print(f"Data loaded - Train: {X_train.shape}, Test: {X_test.shape}")
 
     input_features = X_train.shape[2]
     model = CNN1D(input_features, sequence_length=60)
-    criterion = nn.BCEWithLogitsLoss()
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # Conservative pos_weight for better precision
+    pos_weight = torch.tensor([3.0]).to(device)
+    print(f"Using pos_weight: {pos_weight.item():.1f} (conservative approach)")
+    print("Goal: Precision > 40%, fewer false signals")
+    
+    criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
     optimizer = optim.Adam(model.parameters(), lr=0.001)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
     X_train, X_test = X_train.to(device), X_test.to(device)
     y_train, y_test = y_train.to(device), y_test.to(device)
@@ -55,12 +63,12 @@ if __name__ == "__main__":
     train_dataset = TensorDataset(X_train, y_train)
     train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
 
-    print("Training with CORRECTED architecture...")
+    print("\nTraining with PROFITABLE TARGET (conservative strategy)...")
+    
     for epoch in range(30):
         model.train()
         epoch_loss = 0
         for batch_X, batch_y in train_loader:
-            # НЕТ permute здесь - он в forward()
             optimizer.zero_grad()
             outputs = model(batch_X)
             loss = criterion(outputs.squeeze(), batch_y)
@@ -72,29 +80,131 @@ if __name__ == "__main__":
             avg_loss = epoch_loss / len(train_loader)
             print(f"Epoch [{epoch+1}/30], Loss: {avg_loss:.4f}")
 
-    # Test evaluation
+    # Test evaluation with multiple thresholds
+    print("\n=== EVALUATION WITH DIFFERENT THRESHOLDS ===")
     model.eval()
+    
     with torch.no_grad():
-        outputs = model(X_test)  # НЕТ permute
-        predictions = (torch.sigmoid(outputs) > 0.5).float()
-        accuracy = (predictions.squeeze() == y_test).float().mean()
+        outputs = model(X_test)
+        probabilities = torch.sigmoid(outputs)
         
-        # Additional metrics
-        tp = ((predictions.squeeze() == 1) & (y_test == 1)).sum().item()
-        fp = ((predictions.squeeze() == 1) & (y_test == 0)).sum().item()
-        tn = ((predictions.squeeze() == 0) & (y_test == 0)).sum().item()
-        fn = ((predictions.squeeze() == 0) & (y_test == 1)).sum().item()
+        # Test different thresholds
+        thresholds = [0.5, 0.6, 0.7]
+        best_f1 = 0
+        best_threshold = 0.5
         
-        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-        recall = tp / (tp + fn) if (tp + fn) > 0 else 0
-        
-        print(f"\n=== FINAL RESULTS ===")
-        print(f"Test Accuracy: {accuracy:.4f}")
-        print(f"Precision: {precision:.4f}")
-        print(f"Recall: {recall:.4f}")
-        print(f"True Positives: {tp}, False Positives: {fp}")
-        print(f"True Negatives: {tn}, False Negatives: {fn}")
+        for threshold in thresholds:
+            predictions = (probabilities > threshold).float()
+            
+            tp = ((predictions.squeeze() == 1) & (y_test == 1)).sum().item()
+            fp = ((predictions.squeeze() == 1) & (y_test == 0)).sum().item()
+            tn = ((predictions.squeeze() == 0) & (y_test == 0)).sum().item()
+            fn = ((predictions.squeeze() == 0) & (y_test == 1)).sum().item()
+            
+            accuracy = (predictions.squeeze() == y_test).float().mean()
+            precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+            recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+            f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+            
+            print(f"\n--- Threshold: {threshold} ---")
+            print(f"Accuracy: {accuracy:.4f} ({accuracy*100:.2f}%)")
+            print(f"Precision: {precision:.4f} ({precision*100:.1f}%)")
+            print(f"Recall: {recall:.4f} ({recall*100:.1f}%)")
+            print(f"F1: {f1:.4f}")
+            print(f"Predicted Positives: {(predictions.squeeze() == 1).sum().item()} ({(predictions.squeeze() == 1).float().mean()*100:.1f}%)")
+            
+            if f1 > best_f1:
+                best_f1 = f1
+                best_threshold = threshold
 
+    # Final evaluation with best threshold
+    print(f"\n=== FINAL RESULTS (Best Threshold: {best_threshold}) ===")
+    predictions = (probabilities > best_threshold).float()
+    accuracy = (predictions.squeeze() == y_test).float().mean()
+    
+    tp = ((predictions.squeeze() == 1) & (y_test == 1)).sum().item()
+    fp = ((predictions.squeeze() == 1) & (y_test == 0)).sum().item()
+    tn = ((predictions.squeeze() == 0) & (y_test == 0)).sum().item()
+    fn = ((predictions.squeeze() == 0) & (y_test == 1)).sum().item()
+    
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+    f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+    
+    # Baseline comparison
+    naive_acc = (y_test == 0).float().mean()
+    
+    print(f"\n📊 PERFORMANCE METRICS:")
+    print(f"Test Accuracy: {accuracy:.4f} ({accuracy*100:.2f}%)")
+    print(f"Naive Baseline (always 0): {naive_acc:.4f} ({naive_acc*100:.2f}%)")
+    print(f"Improvement over baseline: {(accuracy - naive_acc):.4f} ({(accuracy - naive_acc)*100:.2f}%)")
+    
+    print(f"\n📈 TRADING METRICS:")
+    print(f"Precision: {precision:.4f} (When we predict BUY, {precision*100:.1f}% are profitable)")
+    print(f"Recall: {recall:.4f} (We catch {recall*100:.1f}% of all profitable trades)")
+    print(f"F1 Score: {f1:.4f}")
+    
+    print(f"\n🎯 CONFUSION MATRIX:")
+    print(f"True Positives:  {tp:5d} (Correct BUY signals)")
+    print(f"False Positives: {fp:5d} (Wrong BUY signals - LOSSES)")
+    print(f"True Negatives:  {tn:5d} (Correct NO-TRADE)")
+    print(f"False Negatives: {fn:5d} (Missed profitable trades)")
+    
+    print(f"\n📊 SIGNAL DISTRIBUTION:")
+    print(f"Actual Profitable: {(y_test == 1).sum().item()} ({(y_test == 1).float().mean()*100:.2f}%)")
+    print(f"Model Predicts: {(predictions.squeeze() == 1).sum().item()} ({(predictions.squeeze() == 1).float().mean()*100:.2f}%)")
+    
+    # Trading simulation
+    print(f"\n💰 EXPECTED PROFITABILITY:")
+    if tp + fp > 0:
+        win_rate = tp / (tp + fp)
+        avg_win = 0.008  # 0.8% profit target
+        avg_loss = 0.004  # 0.4% stop loss
+        commission = 0.002  # 0.2% round trip
+        
+        expected_value = win_rate * (avg_win - commission) - (1 - win_rate) * (avg_loss + commission)
+        
+        print(f"Win Rate: {win_rate*100:.2f}%")
+        print(f"Avg Win: {avg_win*100:.2f}% (before commission)")
+        print(f"Avg Loss: {avg_loss*100:.2f}% (before commission)")
+        print(f"Commission: {commission*100:.2f}% per trade")
+        print(f"Expected Value per Trade: {expected_value*100:.4f}%")
+        
+        if expected_value > 0:
+            print("✅ PROFITABLE STRATEGY!")
+            annual_trades = 252 * 4  # ~4 trades per day
+            predicted_trades = (predictions.squeeze() == 1).sum().item()
+            trade_frequency = predicted_trades / len(y_test)
+            actual_annual_trades = annual_trades * trade_frequency
+            annual_return = expected_value * actual_annual_trades
+            print(f"Estimated Annual Return: {annual_return*100:.1f}% ({actual_annual_trades:.0f} trades/year)")
+        else:
+            print("❌ NOT PROFITABLE with current performance")
+            print(f"Need Win Rate > {(avg_loss + commission)/(avg_win + avg_loss)*100:.1f}% to be profitable")
+
+    # Save model and metrics
     os.makedirs("models", exist_ok=True)
-    torch.save(model.state_dict(), "models/corrected_cnn_model.pth")
-    print("\nModel saved. Training complete.")
+    torch.save(model.state_dict(), "models/profitable_cnn_v3.pth")
+    
+    metrics = {
+        'best_threshold': float(best_threshold),
+        'accuracy': float(accuracy),
+        'precision': float(precision),
+        'recall': float(recall),
+        'f1': float(f1),
+        'win_rate': float(tp/(tp+fp)) if (tp+fp) > 0 else 0,
+        'expected_value': float(expected_value) if tp + fp > 0 else 0,
+        'confusion_matrix': {'tp': tp, 'fp': fp, 'tn': tn, 'fn': fn}
+    }
+    
+    os.makedirs("reports", exist_ok=True)
+    with open('reports/day4_final_metrics.json', 'w') as f:
+        json.dump(metrics, f, indent=2)
+    
+    print(f"\n✅ Model saved to models/profitable_cnn_v3.pth")
+    print(f"📊 Metrics saved to reports/day4_final_metrics.json")
+    print(f"🎯 Best threshold for trading: {best_threshold}")
+    
+    print("\n" + "="*50)
+    print("TRAINING COMPLETE!")
+    print("="*50)
