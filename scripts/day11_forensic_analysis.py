@@ -102,14 +102,26 @@ def backtest_hybrid_detailed(df, signals):
             current_price = df.iloc[i]['close']
             current_time = df.index[i]
 
-            hybrid.update_position(position, df, i)
+            # Update position using CORRECT API
+            try:
+                position, exit_signals = hybrid.update_position(
+                    'BTC/USDT',
+                    current_price,
+                    df,
+                    i
+                )
 
-            # Check if exited
-            exits = hybrid.execute_exits([position], df, i)
-            if exits:
-                exit_price = current_price
-                exit_time = current_time
-                exit_reason = "adaptive_exit"
+                # Check if exited
+                if exit_signals:
+                    exit_price = exit_signals[0]['price']
+                    exit_time = current_time
+                    exit_reason = exit_signals[0]['label']
+
+                    hybrid.execute_exits('BTC/USDT', exit_signals)
+                    break
+
+            except Exception as e:
+                # Position closed or error
                 break
 
         # If didn't exit, use last price
