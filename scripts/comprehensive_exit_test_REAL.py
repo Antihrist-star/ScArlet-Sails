@@ -205,8 +205,6 @@ def backtest_hybrid(df, signals):
     """Hybrid: regime-aware position management"""
     hybrid = HybridPositionManager(
         max_holding_time_bars=168,
-        enable_trailing=True,
-        enable_partial_exits=True,
     )
 
     trades = []
