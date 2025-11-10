@@ -59,8 +59,8 @@ OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
 
 # Hybrid system config
 ML_THRESHOLD = 0.6  # ML probability threshold
-ENABLE_ML_FILTER = False  # Disabled for now
-ENABLE_CRISIS_GATE = False  # Disabled for now
+ENABLE_ML_FILTER = True  # ✅ ENABLED - ML Layer 2 filtering
+ENABLE_CRISIS_GATE = False  # Disabled for now (will enable after ML test)
 
 # ============================================================================
 # HYBRID BACKTEST ENGINE

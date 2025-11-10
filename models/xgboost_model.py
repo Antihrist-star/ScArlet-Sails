@@ -9,10 +9,16 @@ Provides a unified interface for XGBoost classifier with:
 """
 
 import numpy as np
-import torch
 import xgboost as xgb
 import joblib
 from pathlib import Path
+
+# Optional torch support (for handling torch tensors if available)
+try:
+    import torch
+    TORCH_AVAILABLE = True
+except ImportError:
+    TORCH_AVAILABLE = False
 
 
 class XGBoostModel:
@@ -68,7 +74,7 @@ class XGBoostModel:
         
     def _convert_to_numpy(self, X):
         """Convert input to numpy array"""
-        if isinstance(X, torch.Tensor):
+        if TORCH_AVAILABLE and isinstance(X, torch.Tensor):
             return X.cpu().numpy()
         return np.asarray(X)
     
