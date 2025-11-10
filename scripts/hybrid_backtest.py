@@ -392,6 +392,10 @@ def run_backtest():
                 fail_count += 1
                 continue
 
+            # Reset entry system state (CRITICAL!)
+            # Without this, last_signal_bar from previous asset interferes
+            engine.entry_system.reset_state()
+
             # Generate signals
             print(f"   Generating signals...")
             signals = engine.generate_signals(df)

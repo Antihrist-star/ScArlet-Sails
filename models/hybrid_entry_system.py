@@ -457,6 +457,16 @@ class HybridEntrySystem:
             print(f"⚠️  Feature extraction error: {e}")
             return None
 
+    def reset_state(self):
+        """
+        Reset internal state between different assets/tests
+
+        CRITICAL: Must be called before testing each new asset!
+        Otherwise last_signal_bar from previous asset will interfere.
+        """
+        self.last_signal_bar = None
+        # Don't reset total_checks/layer counts - keep for statistics
+
     def get_statistics(self) -> dict:
         """
         Get statistics about signal filtering
