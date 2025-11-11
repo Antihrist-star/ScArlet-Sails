@@ -72,36 +72,47 @@ class ModelAuditor:
         self.df.index = pd.to_datetime(self.df.index)
         self.available = True
 
-    def audit_rule_based(self) -> Dict:
-        """Аудит Rule-Based модели"""
+    def audit_rule_based(self, date_cutoff: str = None) -> Dict:
+        """Аудит Rule-Based модели
+
+        Args:
+            date_cutoff: Test only data before this date (e.g., "2025-10-01")
+        """
         if not self.available:
             return {'error': 'Data not available'}
 
+        # Apply date cutoff if specified
+        df = self.df.copy()
+        if date_cutoff:
+            df = df[df.index < pd.Timestamp(date_cutoff)]
+            if len(df) < FORWARD_BARS:
+                return {'error': f'Not enough data before {date_cutoff}'}
+
         # Calculate RSI
-        delta = self.df['close'].diff()
+        delta = df['close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
         rs = gain / loss
-        self.df['RSI_14'] = 100 - (100 / (1 + rs))
+        df['RSI_14'] = 100 - (100 / (1 + rs))
 
         # Simulate trading
         signals = []
-        for i in range(len(self.df) - FORWARD_BARS):
-            rsi = self.df['RSI_14'].iloc[i]
+        for i in range(len(df) - FORWARD_BARS):
+            rsi = df['RSI_14'].iloc[i]
 
             if pd.notna(rsi) and rsi < RSI_THRESHOLD:
-                entry_price = self.df['close'].iloc[i]
-                exit_price = self.df['close'].iloc[i + FORWARD_BARS]
+                entry_price = df['close'].iloc[i]
+                exit_price = df['close'].iloc[i + FORWARD_BARS]
                 pnl_pct = (exit_price - entry_price) / entry_price * 100
                 profit = pnl_pct > PROFIT_THRESHOLD * 100
 
                 signals.append({
                     'bar': i,
-                    'timestamp': str(self.df.index[i]),
+                    'timestamp': str(df.index[i]),
                     'entry_price': float(entry_price),
                     'exit_price': float(exit_price),
                     'pnl_pct': float(pnl_pct),
-                    'profit': profit,
+                    'profit': int(profit),  # Convert bool to int for JSON
                     'rsi': float(rsi)
                 })
 
@@ -133,8 +144,15 @@ class ModelAuditor:
             'sample_signals': signals[:5]  # First 5 for inspection
         }
 
-    def audit_ml(self, model_path: Path, scaler_path: Path, ml_threshold: float) -> Dict:
-        """Аудит ML модели с OOD detection"""
+    def audit_ml(self, model_path: Path, scaler_path: Path, ml_threshold: float, date_cutoff: str = None) -> Dict:
+        """Аудит ML модели с OOD detection
+
+        Args:
+            model_path: Path to ML model
+            scaler_path: Path to scaler
+            ml_threshold: Probability threshold for entry
+            date_cutoff: Test only data before this date (e.g., "2025-10-01")
+        """
         if not self.available:
             return {'error': 'Data not available'}
 
@@ -153,6 +171,17 @@ class ModelAuditor:
             all_tf, primary_df = extractor.prepare_multi_timeframe_data(self.asset, self.timeframe)
         except Exception as e:
             return {'error': f'Data preparation failed: {str(e)}'}
+
+        # Apply date cutoff if specified
+        if date_cutoff:
+            cutoff_ts = pd.Timestamp(date_cutoff)
+            primary_df = primary_df[primary_df.index < cutoff_ts]
+            # Also filter all_tf dataframes
+            for tf_key in all_tf:
+                all_tf[tf_key] = all_tf[tf_key][all_tf[tf_key].index < cutoff_ts]
+
+            if len(primary_df) < FORWARD_BARS:
+                return {'error': f'Not enough data before {date_cutoff}'}
 
         # Extract features and predict
         signals = []
@@ -188,9 +217,9 @@ class ModelAuditor:
                     'entry_price': float(entry_price),
                     'exit_price': float(exit_price),
                     'pnl_pct': float(pnl_pct),
-                    'profit': profit,
+                    'profit': int(profit),  # Convert bool to int for JSON
                     'ml_score': float(prob_up),
-                    'is_ood': bool(is_ood)
+                    'is_ood': int(is_ood)  # Convert bool to int for JSON
                 })
 
         # Calculate statistics
@@ -227,9 +256,17 @@ class ModelAuditor:
         self,
         model_path: Path,
         scaler_path: Path,
-        ml_threshold: float
+        ml_threshold: float,
+        date_cutoff: str = None
     ) -> Dict:
-        """Аудит Hybrid модели (Rule + ML + Crisis)"""
+        """Аудит Hybrid модели (Rule + ML + Crisis)
+
+        Args:
+            model_path: Path to ML model
+            scaler_path: Path to scaler
+            ml_threshold: Probability threshold for entry
+            date_cutoff: Test only data before this date (e.g., "2025-10-01")
+        """
         if not self.available:
             return {'error': 'Data not available'}
 
@@ -255,6 +292,18 @@ class ModelAuditor:
             all_tf, primary_df = extractor.prepare_multi_timeframe_data(self.asset, self.timeframe)
         except Exception as e:
             return {'error': f'Data preparation failed: {str(e)}'}
+
+        # Apply date cutoff if specified
+        if date_cutoff:
+            cutoff_ts = pd.Timestamp(date_cutoff)
+            self.df = self.df[self.df.index < cutoff_ts]
+            primary_df = primary_df[primary_df.index < cutoff_ts]
+            # Also filter all_tf dataframes
+            for tf_key in all_tf:
+                all_tf[tf_key] = all_tf[tf_key][all_tf[tf_key].index < cutoff_ts]
+
+            if len(primary_df) < FORWARD_BARS:
+                return {'error': f'Not enough data before {date_cutoff}'}
 
         # Simulate trading
         signals = []
@@ -297,7 +346,7 @@ class ModelAuditor:
                 'entry_price': float(entry_price),
                 'exit_price': float(exit_price),
                 'pnl_pct': float(pnl_pct),
-                'profit': profit,
+                'profit': int(profit),  # Convert bool to int for JSON
                 'rsi': float(rsi),
                 'ml_score': float(prob_up)
             })
@@ -433,10 +482,11 @@ def main():
         print(f"{'─'*100}")
         print(json.dumps(docs, indent=2))
 
-    # Load ML model
-    ml_model_path = MODELS_DIR / "xgboost_multi_tf_model.json"
-    ml_scaler_path = MODELS_DIR / "xgboost_multi_tf_scaler.pkl"
+    # Load ML model (NORMALIZED version!)
+    ml_model_path = MODELS_DIR / "xgboost_normalized_model.json"
+    ml_scaler_path = MODELS_DIR / "xgboost_normalized_scaler.pkl"
     ml_threshold = 0.65
+    date_cutoff = "2025-10-01"  # Test only before Oct 2025 downtrend
 
     # Results storage
     results = {
@@ -472,7 +522,7 @@ def main():
 
             # Rule-Based
             print(f"   Testing Rule-Based...")
-            rule_result = auditor.audit_rule_based()
+            rule_result = auditor.audit_rule_based(date_cutoff=date_cutoff)
             results['rule_based'][combo] = rule_result
 
             if 'error' not in rule_result:
@@ -480,7 +530,7 @@ def main():
 
             # ML
             print(f"   Testing ML XGBoost...")
-            ml_result = auditor.audit_ml(ml_model_path, ml_scaler_path, ml_threshold)
+            ml_result = auditor.audit_ml(ml_model_path, ml_scaler_path, ml_threshold, date_cutoff=date_cutoff)
             results['ml'][combo] = ml_result
 
             if 'error' not in ml_result:
@@ -488,7 +538,7 @@ def main():
 
             # Hybrid
             print(f"   Testing Hybrid...")
-            hybrid_result = auditor.audit_hybrid(ml_model_path, ml_scaler_path, ml_threshold)
+            hybrid_result = auditor.audit_hybrid(ml_model_path, ml_scaler_path, ml_threshold, date_cutoff=date_cutoff)
             results['hybrid'][combo] = hybrid_result
 
             if 'error' not in hybrid_result:
