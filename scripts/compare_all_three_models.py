@@ -358,9 +358,14 @@ def compare_models(
         if len(trades) == 0:
             results[model_name]['stats'] = {
                 'total_trades': 0,
+                'winning_trades': 0,
+                'losing_trades': 0,
                 'win_rate': 0,
                 'profit_factor': 0,
-                'total_pnl': 0
+                'total_pnl': 0,
+                'avg_pnl': 0,
+                'avg_win': 0,
+                'avg_loss': 0
             }
             continue
 
