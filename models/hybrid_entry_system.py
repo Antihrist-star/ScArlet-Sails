@@ -14,10 +14,11 @@ Date: 2025-11-10
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Dict
 from models.xgboost_model import XGBoostModel
 from features.crisis_detection import MultiTimeframeDetector
 from models.regime_detector import SimpleRegimeDetector
+from features.multi_timeframe_extractor import MultiTimeframeFeatureExtractor
 
 
 class HybridEntrySystem:
@@ -57,7 +58,9 @@ class HybridEntrySystem:
         min_bars_between_signals: int = 24,
         crisis_sensitivity: str = 'medium',
         enable_ml_filter: bool = True,
-        enable_crisis_gate: bool = True
+        enable_crisis_gate: bool = True,
+        all_timeframes: Optional[Dict[str, pd.DataFrame]] = None,
+        target_timeframe: Optional[str] = None
     ):
         """
         Initialize Hybrid Entry System
@@ -71,6 +74,9 @@ class HybridEntrySystem:
             crisis_sensitivity: Crisis detector sensitivity ('low', 'medium', 'high')
             enable_ml_filter: Enable Layer 2 ML filtering
             enable_crisis_gate: Enable Layer 3 crisis protection
+            all_timeframes: Dict of DataFrames for all 4 TFs (15m, 1h, 4h, 1d)
+                           Required for ML feature extraction
+            target_timeframe: Target timeframe being tested (e.g., '15m')
         """
         # Config
         self.ml_threshold = ml_threshold
@@ -78,6 +84,13 @@ class HybridEntrySystem:
         self.min_bars_between_signals = min_bars_between_signals
         self.enable_ml_filter = enable_ml_filter
         self.enable_crisis_gate = enable_crisis_gate
+
+        # Multi-timeframe data for feature extraction
+        self.all_timeframes = all_timeframes
+        self.target_timeframe = target_timeframe
+
+        # Feature extractor for multi-TF features
+        self.feature_extractor = MultiTimeframeFeatureExtractor()
 
         # Layer 2: ML Filter
         self.ml_model = None
@@ -287,28 +300,50 @@ class HybridEntrySystem:
         bar_index: int
     ) -> Optional[np.ndarray]:
         """
-        Extract features for ML model
+        Extract features for ML model using Multi-Timeframe data
 
-        TODO (Day 2): Implement proper feature extraction!
-
-        The trained XGBoost model expects 31 features in specific order.
-        This is a placeholder that needs to be replaced with actual
-        feature extraction logic.
-
-        Required features (from training):
-        - Technical indicators: RSI, ATR, Volume ratios
-        - Moving averages: EMA, SMA ratios
-        - Regime indicators
-        - Momentum features
-        - Volatility features
-        - etc.
+        The trained XGBoost model expects 31 features from all 4 timeframes:
+        - 13 features from primary timeframe (15m)
+        - 18 features from higher timeframes (1h, 4h, 1d)
 
         Returns:
             np.array of shape (31,) or None if error
         """
         try:
-            # Placeholder: extract basic features
-            # TODO: Replace with proper feature extraction on Day 2!
+            # Check if multi-TF data is available
+            if self.all_timeframes is None or self.target_timeframe is None:
+                # Fallback to old placeholder method (will give random predictions)
+                print("⚠️  Multi-TF data not available, using placeholder features")
+                return self._extract_features_fallback(df, bar_index)
+
+            # Use proper multi-TF feature extraction
+            features = self.feature_extractor.extract_features_at_bar(
+                all_timeframes=self.all_timeframes,
+                target_tf=self.target_timeframe,
+                bar_index=bar_index
+            )
+
+            return features
+
+        except Exception as e:
+            print(f"⚠️  Feature extraction error: {e}")
+            return None
+
+    def _extract_features_fallback(
+        self,
+        df: pd.DataFrame,
+        bar_index: int
+    ) -> Optional[np.ndarray]:
+        """
+        FALLBACK: Old placeholder feature extraction
+
+        WARNING: This gives random predictions! Only use for testing without multi-TF data.
+
+        Returns:
+            np.array of shape (31,) or None if error
+        """
+        try:
+            # OLD PLACEHOLDER CODE (commented out for brevity)
 
             features = []
 
