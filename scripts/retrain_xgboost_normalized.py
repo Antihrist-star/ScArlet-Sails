@@ -411,7 +411,7 @@ def main():
 
     print(f"\n✅ READY TO USE!")
     print(f"\nThis model uses NORMALIZED features and should work on ANY BTC price!")
-    print(f"='*100}")
+    print("="*100)
 
 
 if __name__ == "__main__":
