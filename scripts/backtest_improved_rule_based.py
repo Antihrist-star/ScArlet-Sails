@@ -32,14 +32,22 @@ PROFIT_THRESHOLD = 0.01  # 1%
 def load_and_prepare_data(asset: str, timeframe: str) -> pd.DataFrame:
     """Загружает и подготавливает данные"""
 
-    file_path = DATA_DIR / f"{asset}_{timeframe}.csv"
+    # Files are in parquet format: BTC_USDT_15m.parquet
+    file_path = DATA_DIR / f"{asset}_USDT_{timeframe}.parquet"
 
     if not file_path.exists():
         raise FileNotFoundError(f"Data file not found: {file_path}")
 
     print(f"Loading {file_path}...")
-    df = pd.read_csv(file_path, parse_dates=['timestamp'])
-    df = df.set_index('timestamp')
+    df = pd.read_parquet(file_path)
+
+    # Ensure timestamp is datetime and set as index
+    if 'timestamp' in df.columns:
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+        df = df.set_index('timestamp')
+    elif df.index.name != 'timestamp':
+        # If timestamp is already index, ensure it's datetime
+        df.index = pd.to_datetime(df.index)
 
     # Calculate indicators
     print("Calculating indicators...")
