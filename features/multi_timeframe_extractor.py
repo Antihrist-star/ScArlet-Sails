@@ -1,9 +1,11 @@
 """
 Multi-Timeframe Feature Extractor
 
-Extracts 31 features matching the trained XGBoost model:
-- 13 features from primary timeframe (15m)
+Extracts 31 NORMALIZED features matching the trained XGBoost model:
+- 13 features from primary timeframe (dynamic: 15m/1h/4h/1d)
 - 18 features from higher timeframes (1h, 4h, 1d)
+
+All features are NORMALIZED (ratios, percentages) - works on ANY price level!
 
 Used by: HybridEntrySystem for ML filtering
 """
@@ -18,13 +20,13 @@ warnings.filterwarnings('ignore')
 
 class MultiTimeframeFeatureExtractor:
     """
-    Extract multi-timeframe features for XGBoost model
+    Extract NORMALIZED multi-timeframe features for XGBoost model
 
     Features (31 total):
-    - 15m: RSI, EMA_9, EMA_21, SMA_50, BB (4 cols), ATR, returns (2), volume (2) = 13
-    - 1h, 4h, 1d: close, EMA_9, EMA_21, SMA_50, RSI, returns_5, returns_20 = 7 each x 3 = 21
+    - Primary TF (15m/1h/4h/1d): RSI/100, price ratios, BB%, ATR%, returns, volume_ratio = 13
+    - Higher TFs (1h, 4h, 1d): RSI/100, returns, price ratios, ATR% = 6 each x 3 = 18
 
-    But only key features are selected, matching trained model (18 from higher TFs)
+    All features are scale-invariant (ratios/percentages) - works on ANY price level!
     """
 
     def __init__(self, data_dir: str = "data/raw"):
@@ -92,31 +94,29 @@ class MultiTimeframeFeatureExtractor:
         # SMA
         df[f'{prefix}SMA_50'] = df['close'].rolling(window=50).mean()
 
-        # Bollinger Bands (only for primary timeframe)
-        if prefix == '15m_':
-            df[f'{prefix}BB_middle'] = df['close'].rolling(window=20).mean()
-            df[f'{prefix}BB_std'] = df['close'].rolling(window=20).std()
-            df[f'{prefix}BB_upper'] = df[f'{prefix}BB_middle'] + (df[f'{prefix}BB_std'] * 2)
-            df[f'{prefix}BB_lower'] = df[f'{prefix}BB_middle'] - (df[f'{prefix}BB_std'] * 2)
+        # Bollinger Bands (ALL timeframes)
+        df[f'{prefix}BB_middle'] = df['close'].rolling(window=20).mean()
+        df[f'{prefix}BB_std'] = df['close'].rolling(window=20).std()
+        df[f'{prefix}BB_upper'] = df[f'{prefix}BB_middle'] + (df[f'{prefix}BB_std'] * 2)
+        df[f'{prefix}BB_lower'] = df[f'{prefix}BB_middle'] - (df[f'{prefix}BB_std'] * 2)
 
-        # ATR (only for primary timeframe)
-        if prefix == '15m_':
-            high_low = df['high'] - df['low']
-            high_close = abs(df['high'] - df['close'].shift())
-            low_close = abs(df['low'] - df['close'].shift())
-            true_range = pd.DataFrame({
-                'HL': high_low,
-                'HC': high_close,
-                'LC': low_close
-            }).max(axis=1)
-            df[f'{prefix}ATR_14'] = true_range.rolling(window=14).mean()
+        # ATR (ALL timeframes)
+        high_low = df['high'] - df['low']
+        high_close = abs(df['high'] - df['close'].shift())
+        low_close = abs(df['low'] - df['close'].shift())
+        true_range = pd.DataFrame({
+            'HL': high_low,
+            'HC': high_close,
+            'LC': low_close
+        }).max(axis=1)
+        df[f'{prefix}ATR_14'] = true_range.rolling(window=14).mean()
 
         # Returns
         df[f'{prefix}returns_5'] = df['close'].pct_change(5)
         df[f'{prefix}returns_20'] = df['close'].pct_change(20)
 
-        # Volume features (only for primary timeframe)
-        if prefix == '15m_' and 'volume' in df.columns:
+        # Volume features (ALL timeframes)
+        if 'volume' in df.columns:
             df[f'{prefix}volume_sma'] = df['volume'].rolling(20).mean()
             df[f'{prefix}volume_ratio'] = df['volume'] / (df[f'{prefix}volume_sma'] + 1e-10)
 
@@ -179,37 +179,37 @@ class MultiTimeframeFeatureExtractor:
             timestamp = primary_df.index[bar_index]
             current_close = primary_df['close'].iloc[bar_index]
 
-            # Extract NORMALIZED features from primary timeframe (15m)
+            # Extract NORMALIZED features from primary timeframe (dynamic based on target_tf)
             features = []
 
             # Primary timeframe features (10 normalized + 3 duplicate ratios = 13 total)
             # RSI (already 0-100, divide by 100 to normalize to 0-1)
-            rsi = primary_df[f'15m_RSI_14'].iloc[bar_index] / 100.0
+            rsi = primary_df[f'{target_tf}_RSI_14'].iloc[bar_index] / 100.0
             features.append(rsi)
 
             # Price ratios (normalized!)
-            price_to_ema9 = current_close / primary_df[f'15m_EMA_9'].iloc[bar_index]
-            price_to_ema21 = current_close / primary_df[f'15m_EMA_21'].iloc[bar_index]
-            price_to_sma50 = current_close / primary_df[f'15m_SMA_50'].iloc[bar_index]
+            price_to_ema9 = current_close / primary_df[f'{target_tf}_EMA_9'].iloc[bar_index]
+            price_to_ema21 = current_close / primary_df[f'{target_tf}_EMA_21'].iloc[bar_index]
+            price_to_sma50 = current_close / primary_df[f'{target_tf}_SMA_50'].iloc[bar_index]
             features.append(price_to_ema9)
             features.append(price_to_ema21)
             features.append(price_to_sma50)
 
             # Bollinger Band width as percentage of price (normalized!)
-            bb_std = primary_df[f'15m_BB_std'].iloc[bar_index]
+            bb_std = primary_df[f'{target_tf}_BB_std'].iloc[bar_index]
             bb_width_pct = (2 * bb_std) / current_close
             features.append(bb_width_pct)
 
             # ATR as percentage of price (normalized!)
-            atr_pct = primary_df[f'15m_ATR_14'].iloc[bar_index] / current_close
+            atr_pct = primary_df[f'{target_tf}_ATR_14'].iloc[bar_index] / current_close
             features.append(atr_pct)
 
             # Returns (already normalized!)
-            features.append(primary_df[f'15m_returns_5'].iloc[bar_index])
-            features.append(primary_df[f'15m_returns_20'].iloc[bar_index])  # Note: training uses returns_10
+            features.append(primary_df[f'{target_tf}_returns_5'].iloc[bar_index])
+            features.append(primary_df[f'{target_tf}_returns_20'].iloc[bar_index])
 
             # Volume ratio (normalized!)
-            volume_ratio = primary_df[f'15m_volume_ratio'].iloc[bar_index]
+            volume_ratio = primary_df[f'{target_tf}_volume_ratio'].iloc[bar_index]
             features.append(volume_ratio)
             features.append(volume_ratio)  # Duplicate (matches training: volume_ratio_5, volume_ratio_10)
 
