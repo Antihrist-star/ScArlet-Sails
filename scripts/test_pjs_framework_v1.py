@@ -99,11 +99,15 @@ def main():
     # =========================================================================
     print("[4/4] Running P_j(S) backtest (V1)...")
 
+    # For V1, use simple base scores (0 for no signal, 0.7 for signal)
+    # In V2+, these will be replaced with real ML scores
+    ml_scores = signals.astype(float) * 0.7  # 0 for no signal, 0.7 for rule-based signal
+
     backtest = PjSBacktestEngine(config)
     results = backtest.run(
         ohlcv=ohlcv,
         raw_signals=signals,
-        ml_scores=None  # Not used in V1
+        ml_scores=ml_scores  # Explicit scores
     )
 
     # =========================================================================

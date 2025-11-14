@@ -409,15 +409,21 @@ class PjSBacktestEngine:
         """
         components = PjSComponents()
 
-        # 1. ML Score
-        if self.config.ml_enabled and ml_score >= self.config.ml_threshold:
-            components.ml_score = ml_score
-        else:
-            components.ml_score = 0.0  # Signal blocked
-
-        if components.ml_score == 0.0:
+        # 1. Check if signal exists at all
+        if ml_score <= 0:
+            components.ml_score = 0.0
             components.final_pjs = 0.0
             return 0.0, components
+
+        # 2. If ML filtering is enabled, apply threshold
+        if self.config.ml_enabled:
+            if ml_score < self.config.ml_threshold:
+                components.ml_score = 0.0
+                components.final_pjs = 0.0
+                return 0.0, components
+
+        # Signal passed all checks
+        components.ml_score = ml_score
 
         # 2. Filters (∏I_k)
         components.filter_product = self.filters.product(
