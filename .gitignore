@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+dist/
+*.egg-info/
+
+# Data files (НЕ ЗАГРУЖАЕМ!)
+data/features/*.parquet
+data/raw/*
+*.csv
+*.pkl
+
+# Models (НЕ ЗАГРУЖАЕМ большие!)
+models/*.pth
+models/*.json
+models/*.pkl
+models/*.h5
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
