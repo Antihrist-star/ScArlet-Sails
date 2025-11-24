@@ -1,0 +1,169 @@
+# SCARLET SAILS - CENTRAL CONFIGURATION
+# All system parameters in one place
+
+# Data
+data:
+  assets:
+    - BTC
+    - ETH
+    - SOL
+    - LINK
+    - LDO
+    - SUI
+    - HBAR
+    - ENA
+    - ALGO
+    - AVAX
+    - DOT
+    - LTC
+    - ONDO
+    - UNI
+  
+  timeframes:
+    - 15m
+    - 1h
+    - 4h
+    - 1d
+  
+  data_dir: "data/raw"
+  processed_dir: "data/processed"
+
+# Models
+models:
+  xgboost:
+    model_path: "models/xgboost_normalized_model.json"
+    scaler_path: "models/xgboost_normalized_scaler.pkl"
+    threshold: 0.46
+    n_features: 31
+  
+  regime_detector:
+    model_path: "models/regime_detector.py"
+    lookback_periods: [1, 7, 30]
+    confidence_threshold: 0.6
+  
+  crisis_classifier:
+    model_path: "models/crisis_classifier.py"
+    threshold: 0.7
+    classes:
+      - NORMAL
+      - CRASH
+      - MANIPULATION
+      - GLITCH
+
+# Trading
+trading:
+  initial_capital: 100000
+  position_size: 0.95  # 95% of capital
+  
+  risk_management:
+    take_profit: 0.03  # 3%
+    stop_loss: 0.012   # 1.2%
+    cooldown_bars: 24
+    max_drawdown: 0.15 # 15%
+  
+  filters:
+    use_regime: true
+    use_crisis: true
+    use_correlation: false  # TODO: implement
+    
+  regime_actions:
+    BULL:
+      position_size: 1.0
+      tp: 0.03
+      sl: 0.012
+    BEAR:
+      position_size: 0.5
+      tp: 0.02
+      sl: 0.008
+    SIDEWAYS:
+      position_size: 0.75
+      tp: 0.025
+      sl: 0.01
+
+# P_j(S) Formula Components
+formula:
+  ml_weight: 1.0
+  opportunity_weight: 1.0
+  costs_weight: 1.0
+  risk_penalty_weight: 1.0
+  
+  costs:
+    commission: 0.001  # 0.1%
+    slippage: 0.0005   # 0.05%
+  
+  risk_penalty:
+    volatility_threshold: 0.03
+    correlation_threshold: 0.8
+
+# Training
+training:
+  auto_retrain: false
+  retrain_interval_days: 7
+  min_new_bars: 1000
+  validation_split: 0.2
+  
+  xgboost_params:
+    n_estimators: 100
+    max_depth: 6
+    learning_rate: 0.1
+    random_state: 42
+
+# Backtesting
+backtest:
+  test_period_start: "2024-01-01"
+  test_period_end: null  # null = latest
+  commission: 0.001
+  slippage: 0.0005
+
+# Logging
+logging:
+  level: INFO
+  file: "logs/system.log"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+# Dashboard
+dashboard:
+  host: "localhost"
+  port: 5000
+  update_interval_seconds: 60
+
+# AI Modules (OPUS Enhancement)
+ai_modules:
+  signal_validator:
+    enabled: true
+    confidence_threshold: 0.7
+    max_agents: 5
+    
+  advanced_model_manager:
+    enabled: true
+    mlflow_tracking: true
+    auto_retrain: true
+    retrain_threshold: 0.15  # 15% performance drop
+    
+  market_rag:
+    enabled: false  # Optional for now
+    news_sources: []
+    
+  live_dashboard:
+    enabled: true
+    websocket_port: 8765
+    update_interval_ms: 1000
+
+# AutoGen Configuration
+autogen:
+  max_agents: 5
+  timeout_seconds: 30
+  llm_config:
+    model: "gpt-4"
+    temperature: 0.7
+
+# MLflow Configuration  
+mlflow:
+  tracking_uri: "file:./mlruns"
+  experiment_name: "scarlet-sails"
+  
+# System
+system:
+  timezone: "UTC"
+  random_seed: 42
+  max_threads: 4

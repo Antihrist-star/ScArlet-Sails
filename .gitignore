@@ -1,42 +1,114 @@
-/data/
-.env
-/configs/telegram.json
-# Data files - КРИТИЧЕСКИ ВАЖНО
-data/raw/*.parquet
-data/processed/*.parquet
-data/raw/*.csv
-data/processed/*.csv
-*.pt
-*.pkl
-*.h5
-*.npy
-*.npz
-
-# Models - не загружаем веса
-models/*.pth
-models/*.pkl
-models/*.h5
-models/*.ckpt
-models/*.pt
+# SCARLET SAILS - .gitignore
 
 # Python
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
-# Jupyter
-.ipynb_checkpoints/
+# Virtual Environments
+venv/
+ENV/
+env/
+.venv
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Jupyter Notebooks
+.ipynb_checkpoints
+*.ipynb
+
+# Data files (LARGE!)
+data/raw/*.parquet
+data/processed/*.parquet
+data/features/*.parquet
+*.dvc
+
+# Model files (LARGE!)
+models/*.pt
+models/X_*.pt
+models/y_*.pt
+
+# Keep important models
+!models/xgboost_trained.json
+!models/xgboost_trained_v2.json
+!models/dqn_best_pnl.pth
+!models/training_history.csv
 
 # Logs
 *.log
 logs/
+debug.log
 
-# Temporary
+# Temporary files
 *.tmp
+*.temp
 temp/
 tmp/
 
+# OS
+.DS_Store
+Thumbs.db
 
+# Project specific
+full_inventory.csv
+full_file_list.txt
+tree_structure.txt
+
+# AI engineering hub (submodule)
 ai-engineering-hub/
-backup_old_files/
+
+# Reports (generated)
+reports/*.png
+reports/*.csv
+dispersion_charts/*.png
+
+# Keep important reports
+!reports/comprehensive_model_audit.json
+!reports/day1_final_report.md
+!reports/week1_final_report.md
+
+# Config backups
+*.old
+*.backup
+
+# DVC
+.dvc/
+.dvc/cache/
+.dvc/tmp/
+
+# Test outputs
+test_output/
+*.test
+
+# Secrets (NEVER COMMIT!)
+.env
+secrets.yaml
+api_keys.json
+*.key
+*.pem
