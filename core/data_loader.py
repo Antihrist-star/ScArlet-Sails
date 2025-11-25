@@ -1,134 +1,224 @@
 """
-CORE - DATA LOADER
-Unified data loading and preprocessing
+Data Loader for Scarlet Sails Backtesting Framework
+
+Loads OHLCV data from parquet files.
+Data location: data/raw/{COIN}_USDT_{TIMEFRAME}.parquet
+
+Available coins: ALGO, AVAX, BTC, DOT, ENA, ETH, HBAR, LDO, LINK, LTC, ONDO, SOL, SUI, UNI
+Available timeframes: 15m, 1h, 4h, 1d
+Total combinations: 56
 """
+
 import pandas as pd
-import numpy as np
 from pathlib import Path
-import logging
+from typing import Optional, List, Dict
 
-logger = logging.getLogger(__name__)
+AVAILABLE_COINS = [
+    'ALGO', 'AVAX', 'BTC', 'DOT', 'ENA', 'ETH',
+    'HBAR', 'LDO', 'LINK', 'LTC', 'ONDO', 'SOL', 'SUI', 'UNI'
+]
 
-class DataLoader:
-    """Loads and preprocesses market data"""
+AVAILABLE_TIMEFRAMES = ['15m', '1h', '4h', '1d']
+
+# Timeframe to annual multiplier (for annualized returns)
+TIMEFRAME_MULTIPLIERS = {
+    '15m': 365 * 24 * 4,   # 35040 bars/year
+    '1h': 365 * 24,        # 8760 bars/year
+    '4h': 365 * 6,         # 2190 bars/year
+    '1d': 365,             # 365 bars/year
+}
+
+
+def validate_params(coin: str, timeframe: str) -> None:
+    """Validate coin and timeframe parameters."""
+    if coin not in AVAILABLE_COINS:
+        raise ValueError(
+            f"Invalid coin: {coin}. Available: {AVAILABLE_COINS}"
+        )
+    if timeframe not in AVAILABLE_TIMEFRAMES:
+        raise ValueError(
+            f"Invalid timeframe: {timeframe}. Available: {AVAILABLE_TIMEFRAMES}"
+        )
+
+
+def load_market_data(
+    coin: str,
+    timeframe: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    data_dir: str = 'data/raw'
+) -> pd.DataFrame:
+    """
+    Load OHLCV data for specific coin/timeframe.
     
-    def __init__(self, config):
-        self.config = config
-        self.data_dir = Path(config['data']['data_dir'])
-        self.cache = {}
-        
-    def load_ohlcv(self, asset, timeframe):
-        """Load OHLCV data for asset/timeframe"""
-        cache_key = f"{asset}_{timeframe}"
-        
-        if cache_key in self.cache:
-            logger.debug(f"  Cache hit: {cache_key}")
-            return self.cache[cache_key]
-        
-        filename = f"{asset}_USDT_{timeframe}.parquet"
-        filepath = self.data_dir / filename
-        
-        if not filepath.exists():
-            logger.error(f"  ❌ File not found: {filepath}")
-            return None
-        
+    Parameters
+    ----------
+    coin : str
+        Coin symbol (e.g., 'BTC', 'ETH', 'ENA')
+    timeframe : str
+        Timeframe (e.g., '15m', '1h', '4h', '1d')
+    start_date : str, optional
+        Start date filter (YYYY-MM-DD)
+    end_date : str, optional
+        End date filter (YYYY-MM-DD)
+    data_dir : str
+        Path to data directory
+    
+    Returns
+    -------
+    pd.DataFrame
+        OHLCV data with DatetimeIndex
+        Columns: ['open', 'high', 'low', 'close', 'volume']
+    
+    Raises
+    ------
+    ValueError
+        If coin/timeframe invalid or data validation fails
+    FileNotFoundError
+        If data file not found
+    """
+    validate_params(coin, timeframe)
+    
+    path = Path(data_dir) / f'{coin}_USDT_{timeframe}.parquet'
+    
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Data file not found: {path}\n"
+            f"Verify file exists at: {path.absolute()}"
+        )
+    
+    df = pd.read_parquet(path)
+    
+    # Validate columns
+    required = ['open', 'high', 'low', 'close', 'volume']
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise ValueError(f"Missing required columns: {missing}")
+    
+    # Ensure DatetimeIndex
+    if not isinstance(df.index, pd.DatetimeIndex):
+        if 'timestamp' in df.columns:
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            df = df.set_index('timestamp')
+        else:
+            raise ValueError(
+                f"Index must be DatetimeIndex, got {type(df.index).__name__}"
+            )
+    
+    # Sort by time
+    df = df.sort_index()
+    
+    # Apply date filters with timezone awareness
+    if start_date:
+        start_ts = pd.to_datetime(start_date)
+        if df.index.tz is not None and start_ts.tz is None:
+            start_ts = start_ts.tz_localize(df.index.tz)
+        df = df[df.index >= start_ts]
+    if end_date:
+        end_ts = pd.to_datetime(end_date)
+        if df.index.tz is not None and end_ts.tz is None:
+            end_ts = end_ts.tz_localize(df.index.tz)
+        df = df[df.index <= end_ts]
+    
+    if len(df) == 0:
+        raise ValueError(
+            f"No data for {coin} {timeframe} "
+            f"between {start_date} and {end_date}"
+        )
+    
+    return df[required]
+
+
+def load_multiple_assets(
+    coins: List[str],
+    timeframe: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    data_dir: str = 'data/raw'
+) -> Dict[str, pd.DataFrame]:
+    """
+    Load data for multiple coins.
+    
+    Parameters
+    ----------
+    coins : List[str]
+        List of coin symbols
+    timeframe : str
+        Single timeframe
+    start_date, end_date : str, optional
+        Date filters
+    data_dir : str
+        Path to data directory
+    
+    Returns
+    -------
+    Dict[str, pd.DataFrame]
+        Dictionary mapping coin -> DataFrame
+    """
+    result = {}
+    errors = []
+    
+    for coin in coins:
         try:
-            df = pd.read_parquet(filepath)
-            
-            # Validate columns
-            required_cols = ['open', 'high', 'low', 'close', 'volume']
-            if not all(col in df.columns for col in required_cols):
-                logger.error(f"  ❌ Missing required columns: {filepath}")
-                return None
-            
-            # Cache
-            self.cache[cache_key] = df
-            
-            logger.info(f"  ✅ Loaded {len(df):,} bars: {asset} {timeframe}")
-            return df
-            
+            result[coin] = load_market_data(
+                coin, timeframe, start_date, end_date, data_dir
+            )
         except Exception as e:
-            logger.error(f"  ❌ Error loading {filepath}: {e}")
-            return None
+            errors.append(f"{coin}: {e}")
     
-    def load_multiple(self, assets, timeframes):
-        """Load multiple asset/timeframe combinations"""
-        data = {}
-        
-        for asset in assets:
-            for tf in timeframes:
-                df = self.load_ohlcv(asset, tf)
-                if df is not None:
-                    data[f"{asset}_{tf}"] = df
-        
-        logger.info(f"✅ Loaded {len(data)} datasets")
-        return data
+    if errors and not result:
+        raise ValueError(f"Failed to load any data:\n" + "\n".join(errors))
     
-    def load_multi_timeframe(self, asset):
-        """Load all 4 timeframes for an asset"""
-        df_15m = self.load_ohlcv(asset, '15m')
-        df_1h = self.load_ohlcv(asset, '1h')
-        df_4h = self.load_ohlcv(asset, '4h')
-        df_1d = self.load_ohlcv(asset, '1d')
-        
-        return {
-            '15m': df_15m,
-            '1h': df_1h,
-            '4h': df_4h,
-            '1d': df_1d
-        }
+    if errors:
+        print(f"Warning: Failed to load {len(errors)} assets:")
+        for err in errors:
+            print(f"  {err}")
     
-    def get_test_period(self, df, start=None, end=None):
-        """Extract test period from dataframe"""
-        if start is None:
-            start = self.config['backtest']['test_period_start']
-        
-        df_test = df[df.index >= start].copy()
-        
-        if end is not None:
-            df_test = df_test[df_test.index <= end].copy()
-        
-        return df_test
+    return result
+
+
+def get_data_info(data_dir: str = 'data/raw') -> Dict:
+    """
+    Get information about available data files.
     
-    def calculate_basic_features(self, df):
-        """Calculate basic technical features"""
-        df = df.copy()
-        
-        # Returns
-        df['returns'] = df['close'].pct_change()
-        
-        # Volume ratio
-        df['volume_ma'] = df['volume'].rolling(14).mean()
-        df['volume_ratio'] = df['volume'] / df['volume_ma']
-        
-        # High-Low range
-        df['hl_range'] = (df['high'] - df['low']) / df['close']
-        
-        return df
+    Returns
+    -------
+    Dict
+        Information about available data
+    """
+    path = Path(data_dir)
+    files = list(path.glob('*_USDT_*.parquet')) if path.exists() else []
     
-    def validate_data(self, df):
-        """Validate data quality"""
-        issues = []
-        
-        # Check for NaN
-        if df.isnull().any().any():
-            nan_cols = df.columns[df.isnull().any()].tolist()
-            issues.append(f"NaN values in columns: {nan_cols}")
-        
-        # Check for zeros
-        price_cols = ['open', 'high', 'low', 'close']
-        for col in price_cols:
-            if (df[col] <= 0).any():
-                issues.append(f"Zero/negative values in {col}")
-        
-        # Check for duplicates
-        if df.index.duplicated().any():
-            issues.append("Duplicate timestamps")
-        
-        if issues:
-            logger.warning(f"  ⚠️  Data quality issues:")
-            for issue in issues:
-                logger.warning(f"    - {issue}")
-            return False
-        
-        return True
+    found_coins = set()
+    found_timeframes = set()
+    file_info = []
+    
+    for f in files:
+        name = f.stem  # e.g., 'BTC_USDT_15m'
+        parts = name.split('_')
+        if len(parts) >= 3:
+            coin = parts[0]
+            tf = parts[2]
+            found_coins.add(coin)
+            found_timeframes.add(tf)
+            file_info.append({
+                'file': f.name,
+                'coin': coin,
+                'timeframe': tf,
+                'size_mb': f.stat().st_size / (1024 * 1024)
+            })
+    
+    return {
+        'data_dir': str(path.absolute()),
+        'total_files': len(files),
+        'coins_found': sorted(found_coins),
+        'timeframes_found': sorted(found_timeframes),
+        'expected_coins': AVAILABLE_COINS,
+        'expected_timeframes': AVAILABLE_TIMEFRAMES,
+        'files': file_info
+    }
+
+
+def get_bars_per_year(timeframe: str) -> int:
+    """Get number of bars per year for timeframe."""
+    return TIMEFRAME_MULTIPLIERS.get(timeframe, 365)
