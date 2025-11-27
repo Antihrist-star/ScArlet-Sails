@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scarlet Sails API Documentation</title>
+    <style>
+        :root {
+            --color-primary: #0ea5e9;
+            --color-secondary: #1e293b;
+            --color-text: #e2e8f0;
+            --color-border: #334155;
+            --color-bg: #0f172a;
+            --color-code-bg: #1e293b;
+        }
+        body {
+            background-color: var(--color-bg);
+            color: var(--color-text);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+            margin: 0;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 40px;
+            border-bottom: 2px solid var(--color-border);
+            padding-bottom: 20px;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 32px;
+            color: var(--color-primary);
+        }
+        .nav {
+            display: flex;
+            gap: 20px;
+        }
+        .nav a {
+            color: var(--color-text);
+            text-decoration: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            transition: all 0.3s ease;
+        }
+        .nav a:hover {
+            background-color: var(--color-secondary);
+            color: var(--color-primary);
+        }
+        .section {
+            margin-bottom: 40px;
+            background-color: var(--color-secondary);
+            border: 1px solid var(--color-border);
+            border-radius: 8px;
+            padding: 20px;
+        }
+        .section h2 {
+            margin-top: 0;
+            color: var(--color-primary);
+            border-bottom: 2px solid var(--color-border);
+            padding-bottom: 10px;
+        }
+        .section h3 {
+            color: #60a5fa;
+            margin-top: 20px;
+        }
+        code {
+            background-color: var(--color-code-bg);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 13px;
+        }
+        pre {
+            background-color: var(--color-code-bg);
+            padding: 15px;
+            border-radius: 6px;
+            overflow-x: auto;
+            border: 1px solid var(--color-border);
+        }
+        .endpoint {
+            background-color: rgba(6, 182, 212, 0.1);
+            border-left: 4px solid #06b6d4;
+            padding: 10px 15px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .method {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-weight: bold;
+            font-size: 12px;
+            margin-right: 10px;
+        }
+        .method-get { background-color: #10b981; color: white; }
+        .method-post { background-color: #3b82f6; color: white; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>API Documentation</h1>
+            <div class="nav">
+                <a href="index.html">Home</a>
+                <a href="dashboard.html">Dashboard</a>
+                <a href="models.html">Models</a>
+                <a href="api.html" style="color: var(--color-primary);">API</a>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>DataService API</h2>
+            <p>The DataService module provides read-only access to Scarlet Sails repository data via public GitHub URLs.</p>
+            
+            <h3>Configuration</h3>
+            <p>DataService automatically configures itself with:</p>
+            <pre><code>{
+  REPO_OWNER: 'Antihrist-star',
+  REPO_NAME: 'ScArlet-Sails',
+  BRANCH: 'main',
+  CACHE_TTL: 5 minutes
+}</code></pre>
+
+            <h3>Core Methods</h3>
+            
+            <div class="endpoint">
+                <strong>fetchText(path, fallback)</strong>
+                <p>Fetch raw text from repository file.</p>
+                <pre><code>await DataService.fetchText('/README.md', '-- (No data)')</code></pre>
+            </div>
+
+            <div class="endpoint">
+                <strong>fetchJSON(path, fallback)</strong>
+                <p>Fetch and parse JSON file from repository.</p>
+                <pre><code>await DataService.fetchJSON('/results/latest_result.json', {})</code></pre>
+            </div>
+
+            <div class="endpoint">
+                <strong>getSharpeRatio()</strong>
+                <p>Get latest Sharpe Ratio metric.</p>
+                <pre><code>const ratio = await DataService.getSharpeRatio();</code></pre>
+            </div>
+
+            <div class="endpoint">
+                <strong>getWinRate()</strong>
+                <p>Get latest Win Rate metric.</p>
+                <pre><code>const rate = await DataService.getWinRate();</code></pre>
+            </div>
+
+            <div class="endpoint">
+                <strong>getTotalTrades()</strong>
+                <p>Get total trade count.</p>
+                <pre><code>const trades = await DataService.getTotalTrades();</code></pre>
+            </div>
+
+            <div class="endpoint">
+                <strong>listModels()</strong>
+                <p>Discover available models in repository.</p>
+                <pre><code>const models = await DataService.listModels();</code></pre>
+            </div>
+
+            <div class="endpoint">
+                <strong>getModelCode(modelName)</strong>
+                <p>Get model source code.</p>
+                <pre><code>const code = await DataService.getModelCode('P_rb');</code></pre>
+            </div>
+
+            <div class="endpoint">
+                <strong>getCacheStats()</strong>
+                <p>Get cache statistics for debugging.</p>
+                <pre><code>const stats = DataService.getCacheStats();</code></pre>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Data Binding Principles</h2>
+            <ul>
+                <li><strong>Read-Only:</strong> All operations are read-only public data access</li>
+                <li><strong>Zero Secrets:</strong> No API keys, tokens, or credentials in code</li>
+                <li><strong>Graceful Fallbacks:</strong> Missing data displays "-- (No data)" instead of errors</li>
+                <li><strong>Smart Caching:</strong> 5-minute TTL reduces GitHub rate-limit pressure</li>
+                <li><strong>Public URLs Only:</strong> Uses public GitHub raw content endpoints</li>
+                <li><strong>No Fabrication:</strong> Data is never invented; only real repository data is displayed</li>
+            </ul>
+        </div>
+
+        <div class="section">
+            <h2>Error Handling</h2>
+            <p>All errors are caught and converted to fallback values. Users see "-- (No data available)" instead of errors. Console contains detailed logs for debugging.</p>
+            <pre><code>// Example: If data doesn't exist, the dashboard shows:
+Sharpe Ratio: -- (No data)
+
+// NOT a stack trace or HTTP error
+            </code></pre>
+        </div>
+
+        <div class="section">
+            <h2>Rate Limiting</h2>
+            <p>GitHub's public file access has rate limits. To avoid hitting them:</p>
+            <ul>
+                <li>Caching reduces redundant requests</li>
+                <li>Browser caching helps with repeated visits</li>
+                <li>Consider page refresh delays if using multiple tabs</li>
+            </ul>
+        </div>
+
+        <div class="section">
+            <h2>Repository Data Structure</h2>
+            <p>The dashboard expects the main repository to have:</p>
+            <pre><code>/README.md              - Project documentation
+/models/                - Model implementations
+  /P_rb.py
+  /P_mi.py
+  /P_hyb.py
+/results/               - Performance results/metrics
+  /latest_result.json   (optional)
+  /backtest_results.json (optional)
+            </code></pre>
+        </div>
+    </div>
+</body>
+</html>
