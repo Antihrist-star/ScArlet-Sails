@@ -7,10 +7,10 @@ Model 2: XGBoost на 74 features (single timeframe).
 Формула из документации:
 P_ml(S) = σ(f_XGB(Φ(S))) · ∏ₖ Fₖ(S) - C_adaptive(S) - R_ood(S)
 
-Изменения относительно v2:
+Изменения v3.1:
+- ИСПРАВЛЕНО: DMatrix теперь создаётся с feature_names
 - Работает с 74 features (не 31)
 - Убран multi-timeframe (каждый файл = один таймфрейм)
-- Добавлен generate_signal() для интеграции
 
 Использование:
     from strategies.xgboost_ml_v3 import XGBoostMLStrategyV3
@@ -34,10 +34,6 @@ class XGBoostMLStrategyV3:
     - Input: 74 features (normalized indicators)
     - Model: XGBoost binary classifier
     - Output: probability [0, 1] → signal {0, 1}
-    
-    Компоненты P_ml(S):
-    - σ(f_XGB(Φ(S))): XGBoost probability
-    - ∏ₖ Fₖ(S): Режимные фильтры (crisis, drawdown)
     """
     
     EXPECTED_FEATURES = 74
@@ -69,15 +65,22 @@ class XGBoostMLStrategyV3:
         self.model.load_model(str(path))
         self.model_path = str(path)
         
+        # Получить feature names из модели
+        self.feature_names = self.model.feature_names
+        
         # Загрузить metadata если есть
         metadata_path = path.parent / (path.stem + '_metadata.json')
         if metadata_path.exists():
             import json
             with open(metadata_path, 'r') as f:
                 self.metadata = json.load(f)
-                self.feature_names = self.metadata.get('feature_names')
+                # Если в модели нет feature_names, взять из metadata
+                if self.feature_names is None:
+                    self.feature_names = self.metadata.get('feature_names')
         
         print(f"✅ Model loaded: {path.name}")
+        if self.feature_names:
+            print(f"   Features: {len(self.feature_names)}")
     
     def predict_proba(self, features: Union[pd.DataFrame, np.ndarray]) -> np.ndarray:
         """
@@ -96,26 +99,51 @@ class XGBoostMLStrategyV3:
         if self.model is None:
             raise ValueError("Model not loaded. Call load_model() first.")
         
+        # Обработка DataFrame
         if isinstance(features, pd.DataFrame):
             if 'target' in features.columns:
                 features = features.drop(columns=['target'])
-            features = features.values
+            
+            # Проверить количество features
+            if features.shape[1] != self.EXPECTED_FEATURES:
+                raise ValueError(
+                    f"Expected {self.EXPECTED_FEATURES} features, "
+                    f"got {features.shape[1]}"
+                )
+            
+            # Создать DMatrix напрямую из DataFrame (сохраняет column names)
+            dmatrix = xgb.DMatrix(features)
         
-        if features.shape[1] != self.EXPECTED_FEATURES:
-            raise ValueError(
-                f"Expected {self.EXPECTED_FEATURES} features, "
-                f"got {features.shape[1]}"
-            )
+        # Обработка numpy array
+        else:
+            if features.shape[1] != self.EXPECTED_FEATURES:
+                raise ValueError(
+                    f"Expected {self.EXPECTED_FEATURES} features, "
+                    f"got {features.shape[1]}"
+                )
+            
+            # Создать DMatrix с feature_names
+            dmatrix = xgb.DMatrix(features, feature_names=self.feature_names)
         
-        dmatrix = xgb.DMatrix(features)
         return self.model.predict(dmatrix)
     
-    def predict_single(self, features: Union[pd.Series, np.ndarray]) -> float:
+    def predict_single(self, features: Union[pd.Series, pd.DataFrame, np.ndarray]) -> float:
         """Получить вероятность для одного sample."""
+        
+        # Если Series — конвертировать в DataFrame (сохраняет index как column names)
         if isinstance(features, pd.Series):
-            features = features.values.reshape(1, -1)
-        elif features.ndim == 1:
-            features = features.reshape(1, -1)
+            features = features.to_frame().T
+        
+        # Если numpy 1D — reshape и передать с feature_names
+        elif isinstance(features, np.ndarray):
+            if features.ndim == 1:
+                features = features.reshape(1, -1)
+            # Для numpy создаём DMatrix с feature_names в predict_proba
+        
+        # Если DataFrame с одной строкой — OK
+        elif isinstance(features, pd.DataFrame):
+            if len(features) != 1:
+                features = features.iloc[-1:].copy()
         
         return float(self.predict_proba(features)[0])
     
@@ -148,9 +176,11 @@ class XGBoostMLStrategyV3:
         # 1. Получить вероятность
         if isinstance(features, pd.DataFrame):
             if len(features) == 1:
-                proba = self.predict_single(features.iloc[0])
+                proba = self.predict_single(features)
             else:
-                proba = self.predict_single(features.iloc[-1])
+                proba = self.predict_single(features.iloc[-1:])
+        elif isinstance(features, pd.Series):
+            proba = self.predict_single(features)
         else:
             proba = self.predict_single(features)
         
@@ -186,10 +216,12 @@ class XGBoostMLStrategyV3:
         """Генерировать сигналы для всего DataFrame."""
         result = df.copy()
         
+        # Получить features как DataFrame (сохраняет column names)
         feature_cols = [c for c in df.columns if c != 'target']
-        features = df[feature_cols].values
+        features_df = df[feature_cols]
         
-        probabilities = self.predict_proba(features)
+        # Предсказать (передаём DataFrame, не numpy)
+        probabilities = self.predict_proba(features_df)
         
         result['ml_proba'] = probabilities
         result['ml_signal'] = (probabilities >= threshold).astype(int)
@@ -205,7 +237,7 @@ class XGBoostMLStrategyV3:
         """Оценить качество модели."""
         from sklearn.metrics import (
             roc_auc_score, f1_score, precision_score, 
-            recall_score, accuracy_score, confusion_matrix
+            recall_score, accuracy_score
         )
         
         y_proba = self.predict_proba(X)
