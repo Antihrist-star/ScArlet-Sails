@@ -2,20 +2,14 @@
 Массовое обучение XGBoost v3 на всех 56 комбинациях
 ====================================================
 
-Обучает модель для каждой пары (монета × таймфрейм)
-Сохраняет результаты в CSV для анализа
-
-Использование:
-    python scripts/train_all_combinations.py
-    
-Время выполнения: ~3-4 часа (56 × 3-5 минут)
+Читает метрики из сохраненных metadata.json файлов
 """
 
 import subprocess
 import pandas as pd
 from pathlib import Path
 from datetime import datetime
-import os
+import json
 
 # Конфигурация
 COINS = [
@@ -26,6 +20,7 @@ COINS = [
 TIMEFRAMES = ["15m", "1h", "4h", "1d"]
 
 DATA_DIR = Path("data/features")
+MODELS_DIR = Path("models")
 RESULTS_FILE = f"training_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
 
 def check_data_exists(coin, tf):
@@ -33,12 +28,43 @@ def check_data_exists(coin, tf):
     file_path = DATA_DIR / f"{coin}_USDT_{tf}_features.parquet"
     return file_path.exists()
 
+def read_metadata(coin, tf):
+    """
+    Прочитать метрики из metadata.json
+    
+    Returns:
+        dict: Метрики или None если файл не найден
+    """
+    metadata_path = MODELS_DIR / f"xgboost_v3_{coin.lower()}_{tf}_metadata.json"
+    
+    if not metadata_path.exists():
+        return None
+    
+    try:
+        with open(metadata_path, 'r') as f:
+            metadata = json.load(f)
+        
+        # Извлечь метрики
+        metrics = metadata.get('metrics', {})
+        optimal = metadata.get('optimal_threshold', {})
+        
+        return {
+            'auc': metrics.get('auc'),
+            'f1': optimal.get('best_f1'),
+            'precision': optimal.get('precision_at_best'),
+            'recall': optimal.get('recall_at_best'),
+            'samples': None  # Можно добавить в metadata если нужно
+        }
+    except Exception as e:
+        print(f"   ⚠️ Ошибка чтения metadata: {e}")
+        return None
+
 def train_combination(coin, tf):
     """
     Обучить модель для одной комбинации
     
     Returns:
-        dict: Результаты обучения или None если ошибка
+        dict: Результаты обучения
     """
     print(f"\n{'='*80}")
     print(f"🚀 ОБУЧЕНИЕ: {coin}/{tf}")
@@ -73,57 +99,42 @@ def train_combination(coin, tf):
             timeout=600  # 10 минут timeout
         )
         
-        # Парсить вывод для извлечения метрик
-        output = result.stdout
+        # Попытка 1: Прочитать из metadata файла
+        metrics_dict = read_metadata(coin, tf)
         
-        # Извлечь метрики (примерный парсинг)
-        auc = None
-        f1 = None
-        precision = None
-        recall = None
-        samples = None
-        
-        for line in output.split('\n'):
-            if 'AUC:' in line:
-                try:
-                    auc = float(line.split('AUC:')[1].strip())
-                except:
-                    pass
-            elif 'F1:' in line:
-                try:
-                    f1 = float(line.split('F1:')[1].strip())
-                except:
-                    pass
-            elif 'Precision:' in line:
-                try:
-                    precision = float(line.split('Precision:')[1].strip())
-                except:
-                    pass
-            elif 'Recall:' in line:
-                try:
-                    recall = float(line.split('Recall:')[1].strip())
-                except:
-                    pass
-            elif 'Test:' in line and 'samples' in line:
-                try:
-                    samples = int(line.split()[1].replace(',', ''))
-                except:
-                    pass
-        
-        status = '✅ SUCCESS' if auc is not None else '⚠️ PARSE_ERROR'
-        
-        print(f"✅ Завершено: AUC={auc:.4f if auc else 'N/A'}, F1={f1:.4f if f1 else 'N/A'}")
-        
-        return {
-            'coin': coin,
-            'timeframe': tf,
-            'status': status,
-            'auc': auc,
-            'f1': f1,
-            'precision': precision,
-            'recall': recall,
-            'samples': samples
-        }
+        if metrics_dict and metrics_dict['auc'] is not None:
+            status = '✅ SUCCESS'
+            auc_str = f"{metrics_dict['auc']:.4f}"
+            f1_str = f"{metrics_dict['f1']:.4f}" if metrics_dict['f1'] is not None else "N/A"
+            print(f"✅ Завершено: AUC={auc_str}, F1={f1_str}")
+            
+            return {
+                'coin': coin,
+                'timeframe': tf,
+                'status': status,
+                **metrics_dict
+            }
+        else:
+            # Модель не обучилась или metadata не создан
+            status = '❌ TRAIN_FAILED'
+            print(f"❌ Обучение не удалось")
+            
+            # Диагностика
+            if result.stderr:
+                print(f"STDERR (первые 500 символов):\n{result.stderr[:500]}")
+            if result.returncode != 0:
+                print(f"Return code: {result.returncode}")
+            
+            return {
+                'coin': coin,
+                'timeframe': tf,
+                'status': status,
+                'auc': None,
+                'f1': None,
+                'precision': None,
+                'recall': None,
+                'samples': None
+            }
         
     except subprocess.TimeoutExpired:
         print(f"❌ TIMEOUT: Обучение превысило 10 минут")
@@ -139,6 +150,8 @@ def train_combination(coin, tf):
         }
     except Exception as e:
         print(f"❌ ERROR: {e}")
+        import traceback
+        traceback.print_exc()
         return {
             'coin': coin,
             'timeframe': tf,
@@ -160,6 +173,7 @@ def main():
     print(f"Таймфреймы: {len(TIMEFRAMES)}")
     print(f"Всего комбинаций: {len(COINS) * len(TIMEFRAMES)}")
     print(f"Результаты: {RESULTS_FILE}")
+    print(f"Метод: Чтение из metadata.json файлов")
     print("="*80)
     
     results = []
@@ -215,6 +229,10 @@ def main():
         print(f"\n🏆 ТОП-5 ПО AUC:")
         top5 = successful.nlargest(5, 'auc')[['coin', 'timeframe', 'auc', 'f1']]
         print(top5.to_string(index=False))
+    else:
+        print("  ⚠️ Нет успешных обучений")
+        print("\n🔍 ПЕРВЫЕ 5 РЕЗУЛЬТАТОВ:")
+        print(results_df.head()[['coin', 'timeframe', 'status']])
 
 if __name__ == "__main__":
     main()
