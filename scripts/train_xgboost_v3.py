@@ -12,7 +12,10 @@ import pandas as pd
 import xgboost as xgb
 import yaml
 
-from backtesting.honest_backtest_v2 import HonestBacktestV2
+from analysis.simple_threshold_backtest import (
+    evaluate_thresholds,
+    select_optimal_threshold,
+)
 from core.feature_engine_v2 import FeatureSpecV3
 from core.feature_loader import FeatureLoader
 
@@ -21,6 +24,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train XGBoost v3 model")
     parser.add_argument("--config-path", type=str, default="configs/model2_training.yaml")
     parser.add_argument("--experiment-name", type=str, default="default")
+    parser.add_argument("--coin", type=str, help="Override coin from config (e.g., BTCUSDT)")
+    parser.add_argument("--tf", type=str, help="Override timeframe from config (e.g., 15m)")
+    parser.add_argument("--no-backtest", action="store_true", help="Skip threshold optimization")
     return parser.parse_args()
 
 
@@ -119,41 +125,6 @@ def evaluate_model(model: xgb.XGBClassifier, X: pd.DataFrame, y: pd.Series, thre
     }
 
 
-def backtest_thresholds(probabilities: np.ndarray, val_df: pd.DataFrame, thresholds: List[float], backtest_cfg: Dict) -> Dict:
-    ohlcv_cols = ["open", "high", "low", "close", "volume"]
-    ohlcv = val_df[ohlcv_cols]
-    results = {}
-
-    for th in thresholds:
-        signals = (probabilities >= th).astype(int)
-        engine = HonestBacktestV2(
-            commission=backtest_cfg.get("commission", 0.001),
-            slippage=backtest_cfg.get("slippage", 0.0005),
-            max_hold_bars=backtest_cfg.get("max_hold_bars", 100),
-            take_profit=backtest_cfg.get("take_profit", 0.02),
-            stop_loss=backtest_cfg.get("stop_loss", 0.01),
-            cooldown_bars=backtest_cfg.get("cooldown_bars", 10),
-        )
-        metrics = engine.run(ohlcv, signals)
-        results[th] = metrics
-
-    return results
-
-
-def select_optimal_threshold(backtest_results: Dict[float, Dict], max_dd_limit: float) -> Dict:
-    best_th = None
-    best_sharpe = -np.inf
-    for th, metrics in backtest_results.items():
-        if metrics.get("max_drawdown_pct", 0) <= max_dd_limit and metrics.get("sharpe_ratio", -np.inf) > best_sharpe:
-            best_sharpe = metrics["sharpe_ratio"]
-            best_th = th
-    return {
-        "threshold": best_th,
-        "sharpe": best_sharpe,
-        "backtest_metrics": backtest_results.get(best_th, {}),
-    }
-
-
 def save_model(model: xgb.XGBClassifier, output_path: Path, feature_spec: FeatureSpecV3, metadata: Dict) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     model.save_model(str(output_path))
@@ -175,11 +146,19 @@ def main():
     costs_cfg = cfg.get("costs", {})
     backtest_cfg = cfg.get("backtest", {})
 
+    # Override coin and timeframe from CLI if provided
+    coin = args.coin if args.coin else model_cfg.get("coin", "BTC")
+    timeframe = args.tf if args.tf else model_cfg.get("timeframe", "15m")
+
     loader = FeatureLoader(data_dir=model_cfg.get("data_dir", "data/features"))
-    coin = model_cfg.get("coin", "BTC")
-    timeframe = model_cfg.get("timeframe", "15m")
     file_path = loader.get_file_path(coin, timeframe)
-    df = loader.load_features(coin=coin, timeframe=timeframe, start_date=model_cfg["train_start"], end_date=model_cfg.get("test_end"), validate=True)
+    df = loader.load_features(
+        coin=coin,
+        timeframe=timeframe,
+        start_date=model_cfg["train_start"],
+        end_date=model_cfg.get("test_end"),
+        validate=True
+    )
 
     df_with_targets = compute_targets(
         df,
@@ -210,10 +189,39 @@ def main():
     metrics_val = evaluate_model(model, X_val, y_val, threshold=0.5)
     metrics_test = evaluate_model(model, X_test, y_test, threshold=0.5)
 
-    val_prob = model.predict_proba(X_val)[:, 1]
-    thresholds = backtest_cfg.get("threshold_grid", [round(x, 2) for x in np.linspace(0.5, 0.9, 5)])
-    bt_results = backtest_thresholds(val_prob, val_df, thresholds, backtest_cfg)
-    optimal = select_optimal_threshold(bt_results, max_dd_limit=backtest_cfg.get("max_dd_pct", 20))
+    # Threshold optimization on validation set
+    optimal = {"threshold": 0.5, "sharpe": 0.0, "backtest_metrics": {}}
+    
+    if not args.no_backtest:
+        val_prob = model.predict_proba(X_val)[:, 1]
+        
+        # Add probabilities to validation dataframe
+        val_df_with_proba = val_df.copy()
+        val_df_with_proba["P_ml"] = val_prob
+        
+        # Evaluate threshold grid
+        thresholds = backtest_cfg.get("threshold_grid", [round(x, 2) for x in np.linspace(0.5, 0.9, 5)])
+        bt_results = evaluate_thresholds(
+            df=val_df_with_proba,
+            proba_col="P_ml",
+            fee_ret_col="fee_ret",
+            thresholds=thresholds
+        )
+        
+        # Select optimal threshold
+        optimal = select_optimal_threshold(
+            threshold_results=bt_results,
+            max_dd_limit=backtest_cfg.get("max_dd_pct", 20.0),
+            min_trades=backtest_cfg.get("min_trades", 10)
+        )
+        
+        print(f"\nThreshold optimization complete:")
+        print(f"  Best threshold: {optimal['threshold']:.2f}")
+        print(f"  Sharpe ratio: {optimal['sharpe']:.4f}")
+        print(f"  Trades: {optimal['backtest_metrics'].get('n_trades', 0)}")
+        print(f"  Win rate: {optimal['backtest_metrics'].get('win_rate', 0):.2f}%")
+    else:
+        print("\nSkipping threshold optimization (--no-backtest flag)")
 
     output_path = Path(model_cfg.get("output_path", f"models/xgboost_v3_{coin.lower()}_{timeframe}.json"))
     metadata = {
@@ -240,7 +248,11 @@ def main():
         "test": metrics_test,
         "best_threshold": optimal,
     }
+    print("\n" + "="*60)
     print(json.dumps(summary, indent=2))
+    print("="*60)
+    print(f"\nModel saved to: {output_path}")
+    print(f"Metadata saved to: {output_path.with_name(output_path.stem + '_metadata.json')}")
 
 
 if __name__ == "__main__":
