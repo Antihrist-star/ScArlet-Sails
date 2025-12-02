@@ -41,6 +41,90 @@ def load_config(path: str) -> Dict:
     return yaml.safe_load(cfg_path.read_text())
 
 
+def sanitize_features_and_target(
+    X: pd.DataFrame,
+    y: pd.Series,
+    *,
+    context: str = "",
+    max_bad_ratio: float = 0.1
+) -> Tuple[pd.DataFrame, pd.Series]:
+    """
+    Clean features and target by removing rows with inf/-inf/NaN values.
+    
+    Args:
+        X: Feature matrix
+        y: Target vector
+        context: Description for logging (e.g., 'train', 'val')
+        max_bad_ratio: Maximum ratio of bad rows allowed (default: 0.1 = 10%)
+    
+    Returns:
+        Tuple of (cleaned_X, cleaned_y)
+    
+    Raises:
+        ValueError: If more than max_bad_ratio of rows contain non-finite values
+    """
+    n_total = len(X)
+    
+    if n_total == 0:
+        logger.warning(f"[sanitize_features] {context}: empty dataset provided")
+        return X, y
+    
+    # Replace inf/-inf with NaN
+    X_clean = X.replace([np.inf, -np.inf], np.nan)
+    y_clean = y.replace([np.inf, -np.inf], np.nan)
+    
+    # Create mask for finite values (both X and y must be finite)
+    mask_x_finite = X_clean.apply(lambda col: np.isfinite(col)).all(axis=1)
+    mask_y_finite = np.isfinite(y_clean)
+    mask_finite = mask_x_finite & mask_y_finite
+    
+    n_bad = (~mask_finite).sum()
+    n_good = mask_finite.sum()
+    
+    # Log statistics
+    if n_bad > 0:
+        bad_ratio = n_bad / n_total
+        logger.warning(
+            f"[sanitize_features] {context}: dropping {n_bad} / {n_total} rows "
+            f"({bad_ratio:.2%}) due to non-finite values"
+        )
+        
+        # Count inf/nan by type for detailed diagnostics
+        n_inf_x = np.isinf(X.values).any(axis=1).sum()
+        n_nan_x = X.isna().any(axis=1).sum()
+        n_inf_y = np.isinf(y.values).sum()
+        n_nan_y = y.isna().sum()
+        
+        logger.info(
+            f"[sanitize_features] {context} breakdown: "
+            f"X_inf={n_inf_x}, X_nan={n_nan_x}, y_inf={n_inf_y}, y_nan={n_nan_y}"
+        )
+        
+        # Fail if too many bad rows
+        if bad_ratio > max_bad_ratio:
+            raise ValueError(
+                f"[sanitize_features] {context}: {bad_ratio:.2%} of rows had non-finite values "
+                f"({n_bad}/{n_total}), which exceeds the threshold of {max_bad_ratio:.2%}. "
+                f"This suggests a serious data quality issue that must be fixed at the source."
+            )
+    else:
+        logger.info(f"[sanitize_features] {context}: all {n_total} rows are clean (no non-finite values)")
+    
+    # Apply mask to clean data
+    X_clean = X_clean[mask_finite]
+    y_clean = y_clean[mask_finite]
+    
+    # Final sanity check: verify no inf/nan remain
+    assert not np.isinf(X_clean.values).any(), f"{context}: inf values remain in X after sanitization"
+    assert not X_clean.isna().any().any(), f"{context}: NaN values remain in X after sanitization"
+    assert not np.isinf(y_clean.values).any(), f"{context}: inf values remain in y after sanitization"
+    assert not y_clean.isna().any(), f"{context}: NaN values remain in y after sanitization"
+    
+    logger.info(f"[sanitize_features] {context}: returning {len(X_clean)} clean rows")
+    
+    return X_clean, y_clean
+
+
 def compute_targets(df: pd.DataFrame, horizon: int, commission: float, slippage: float, target_type: str) -> pd.DataFrame:
     df = df.copy()
     entry_price = df["open"].shift(-1)
@@ -52,7 +136,7 @@ def compute_targets(df: pd.DataFrame, horizon: int, commission: float, slippage:
 
     df["raw_ret"] = raw_ret
     df["fee_ret"] = fee_ret
-    df["rapnl"] = fee_ret  # Placeholder until RAPnL is formalised
+    df["rapnl"] = fee_ret
 
     if target_type == "fee_ret":
         target_series = (df["fee_ret"] > 0).astype(int)
@@ -62,7 +146,7 @@ def compute_targets(df: pd.DataFrame, horizon: int, commission: float, slippage:
         target_series = (df["rapnl"] > 0).astype(int)
 
     df["target"] = target_series
-    df = df.iloc[:-horizon]  # drop tail with NaNs/unknown targets
+    df = df.iloc[:-horizon]
 
     return df.dropna(subset=["target"])
 
@@ -74,24 +158,6 @@ def temporal_split(
     val_end: str,
     test_end: Optional[str]
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """
-    Split DataFrame into train/val/test sets by temporal boundaries.
-    
-    Handles both tz-aware and tz-naive datetime indices correctly.
-    
-    Args:
-        df: DataFrame with DatetimeIndex
-        train_start: Start of training period (ISO format string)
-        train_end: End of training period (start of validation)
-        val_end: End of validation period (start of test)
-        test_end: End of test period (None = use all remaining data)
-    
-    Returns:
-        Tuple of (train_df, val_df, test_df)
-    
-    Raises:
-        TypeError: If df.index is not a DatetimeIndex
-    """
     df_sorted = df.sort_index()
     
     if not isinstance(df_sorted.index, pd.DatetimeIndex):
@@ -99,9 +165,7 @@ def temporal_split(
     
     idx = df_sorted.index
     
-    # Handle timezone-aware vs timezone-naive indices
     if idx.tz is not None:
-        # Index is tz-aware (e.g., UTC) -> convert boundaries to same timezone
         tz = idx.tz
         logger.info(f"Index is tz-aware (timezone: {tz})")
         
@@ -110,7 +174,6 @@ def temporal_split(
         val_end_ts = pd.Timestamp(val_end, tz=tz)
         test_end_ts = pd.Timestamp(test_end, tz=tz) if test_end else None
     else:
-        # Index is tz-naive -> keep boundaries tz-naive
         logger.info("Index is tz-naive")
         
         train_start_ts = pd.Timestamp(train_start)
@@ -118,7 +181,6 @@ def temporal_split(
         val_end_ts = pd.Timestamp(val_end)
         test_end_ts = pd.Timestamp(test_end) if test_end else None
     
-    # Log data range and split boundaries
     logger.info(f"Data range: {idx.min()} to {idx.max()}")
     logger.info(f"Train period: {train_start_ts} to {train_end_ts}")
     logger.info(f"Val period: {train_end_ts} to {val_end_ts}")
@@ -127,7 +189,6 @@ def temporal_split(
     else:
         logger.info(f"Test period: {val_end_ts} to end")
     
-    # Create masks for each period
     train_mask = (idx >= train_start_ts) & (idx < train_end_ts)
     val_mask = (idx >= train_end_ts) & (idx < val_end_ts)
     
@@ -140,10 +201,8 @@ def temporal_split(
     val_df = df_sorted[val_mask]
     test_df = df_sorted[test_mask]
     
-    # Log split sizes
     logger.info(f"Split sizes: train={len(train_df)}, val={len(val_df)}, test={len(test_df)}")
     
-    # Warn if any split is empty
     if len(train_df) == 0:
         logger.warning("Training set is empty! Check date ranges.")
     if len(val_df) == 0:
@@ -219,7 +278,6 @@ def save_model(model: xgb.XGBClassifier, output_path: Path, feature_spec: Featur
 def main():
     args = parse_args()
     
-    # Setup logging
     log_level = logging.INFO if args.verbose else logging.WARNING
     logging.basicConfig(
         level=log_level,
@@ -232,7 +290,6 @@ def main():
     costs_cfg = cfg.get("costs", {})
     backtest_cfg = cfg.get("backtest", {})
 
-    # Override coin and timeframe from CLI if provided
     coin = args.coin if args.coin else model_cfg.get("coin", "BTC")
     timeframe = args.tf if args.tf else model_cfg.get("timeframe", "15m")
 
@@ -284,7 +341,20 @@ def main():
     if feature_spec.n_features != 74:
         raise ValueError(f"Expected 74 features, got {feature_spec.n_features}")
 
+    print("Building feature matrices...")
     X_train, X_val, X_test, y_train, y_val, y_test = build_dmatrices(train_df, val_df, test_df, feature_spec)
+    print(f"  Train: X={X_train.shape}, y={y_train.shape}")
+    print(f"  Val:   X={X_val.shape}, y={y_val.shape}")
+    print(f"  Test:  X={X_test.shape}, y={y_test.shape}\n")
+
+    print("Sanitizing features and targets (removing inf/NaN)...")
+    X_train, y_train = sanitize_features_and_target(X_train, y_train, context="train")
+    X_val, y_val = sanitize_features_and_target(X_val, y_val, context="val")
+    X_test, y_test = sanitize_features_and_target(X_test, y_test, context="test")
+    print(f"  After sanitization:")
+    print(f"    Train: {len(X_train)} samples")
+    print(f"    Val:   {len(X_val)} samples")
+    print(f"    Test:  {len(X_test)} samples\n")
 
     print("Training XGBoost model...")
     model_params = model_cfg.get("xgboost_params", {})
@@ -299,27 +369,23 @@ def main():
     print(f"  Val AUC:   {metrics_val['auc']:.4f}")
     print(f"  Test AUC:  {metrics_test['auc']:.4f}\n")
 
-    # Threshold optimization on validation set
     optimal = {"threshold": 0.5, "sharpe": 0.0, "backtest_metrics": {}}
     
     if not args.no_backtest:
         print("Optimizing threshold on validation set...")
         val_prob = model.predict_proba(X_val)[:, 1]
         
-        # Add probabilities to validation dataframe
-        val_df_with_proba = val_df.copy()
-        val_df_with_proba["P_ml"] = val_prob
+        val_df_clean = val_df.loc[X_val.index].copy()
+        val_df_clean["P_ml"] = val_prob
         
-        # Evaluate threshold grid
         thresholds = backtest_cfg.get("threshold_grid", [round(x, 2) for x in np.linspace(0.5, 0.9, 5)])
         bt_results = evaluate_thresholds(
-            df=val_df_with_proba,
+            df=val_df_clean,
             proba_col="P_ml",
             fee_ret_col="fee_ret",
             thresholds=thresholds
         )
         
-        # Select optimal threshold
         optimal = select_optimal_threshold(
             threshold_results=bt_results,
             max_dd_limit=backtest_cfg.get("max_dd_pct", 20.0),
